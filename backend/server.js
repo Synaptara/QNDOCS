@@ -13,42 +13,59 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
+/* =========================
+   CORS CONFIG (FIXED)
+========================= */
 
 const allowedOrigins = [
     'http://localhost:5173',
-    'http://localhost:3000',
-    ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : []),
-    process.env.FRONTEND_URL
-].map(o => o?.trim().replace(/\/$/, '')).filter(Boolean);
-
-console.log('📡 Allowed Origins:', allowedOrigins);
+    'http://localhost:3000'
+];
 
 app.use(cors({
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
+
         const normalizedOrigin = origin.trim().replace(/\/$/, '');
+
+        // Allow localhost
         if (allowedOrigins.includes(normalizedOrigin)) {
-            callback(null, true);
-        } else {
-            console.log('⚠️ Blocked by CORS:', origin);
-            callback(new Error('Not allowed by CORS'));
+            return callback(null, true);
         }
+
+        // Allow ALL Vercel deployments
+        if (normalizedOrigin.endsWith('.vercel.app')) {
+            return callback(null, true);
+        }
+
+        console.log('⚠️ Blocked by CORS:', origin);
+        return callback(new Error('Not allowed by CORS'));
     },
     credentials: true
 }));
+
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+/* =========================
+   SESSION STORAGE
+========================= */
 
 const getSessionDir = (sessionId) => {
     const safeSessionId = (sessionId || 'default').replace(/[^a-z0-9_-]/gi, '_');
     const userPath = path.join(__dirname, 'uploads', safeSessionId);
+
     if (!fs.existsSync(userPath)) {
         fs.mkdirSync(userPath, { recursive: true });
     }
+
     return userPath;
 };
 
-// File upload configuration using Multer
+/* =========================
+   MULTER SETUP
+========================= */
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const sessionId = req.headers['x-session-id'] || 'default';
@@ -58,19 +75,26 @@ const storage = multer.diskStorage({
         cb(null, Date.now() + '-' + file.originalname);
     }
 });
+
 const upload = multer({ storage });
+
+/* =========================
+   DOCUMENT HELPERS
+========================= */
 
 const getSessionDocuments = (sessionId) => {
     const sessionDir = getSessionDir(sessionId);
     if (!fs.existsSync(sessionDir)) return [];
 
     const files = fs.readdirSync(sessionDir);
+
     return files
         .filter(f => f !== '.DS_Store' && f.includes('-'))
         .map(filename => {
             const filePath = path.join(sessionDir, filename);
             const stats = fs.statSync(filePath);
             const originalName = filename.substring(filename.indexOf('-') + 1);
+
             return {
                 id: filename.split('-')[0],
                 name: originalName,
@@ -82,7 +106,6 @@ const getSessionDocuments = (sessionId) => {
         });
 };
 
-
 const readFileContent = (filePath) => {
     try {
         return fs.readFileSync(filePath, 'utf-8');
@@ -92,9 +115,9 @@ const readFileContent = (filePath) => {
     }
 };
 
-// Logic to split documents into manageable chunks
 const chunkDocument = (text, docId, docName) => {
     const rawChunks = text.split(/\n\s*\n/);
+
     return rawChunks
         .map(chunk => chunk.trim())
         .filter(chunk => chunk.length > 50)
@@ -105,18 +128,15 @@ const chunkDocument = (text, docId, docName) => {
         }));
 };
 
-// Groq api
+/* =========================
+   GROQ API
+========================= */
+
 const callGroqAPI = async (prompt) => {
     try {
         const chatCompletion = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
-           
-            model: "llama-3.3-70b-versatile", 
+            messages: [{ role: "user", content: prompt }],
+            model: "llama-3.3-70b-versatile",
             temperature: 0.1,
             max_tokens: 1024,
         });
@@ -128,9 +148,10 @@ const callGroqAPI = async (prompt) => {
     }
 };
 
-// Routes
+/* =========================
+   ROUTES
+========================= */
 
-// Root Welcome Route
 app.get('/', (req, res) => {
     res.send(`
         <div style="font-family: sans-serif; padding: 40px; text-align: center;">
@@ -142,19 +163,17 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Health Check
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
         services: {
-            database: 'operational',
             ai_engine: process.env.GROQ_API_KEY ? 'Groq Connected' : 'Missing Key'
         }
     });
 });
 
-// Upload Document
+/* Upload */
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -171,17 +190,21 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     };
 
     console.log(`📂 User [${sessionId}] uploaded: ${originalName}`);
-    res.status(201).json({ message: 'File uploaded successfully', document: newDoc });
+
+    res.status(201).json({
+        message: 'File uploaded successfully',
+        document: newDoc
+    });
 });
 
-// List Documents
+/* List */
 app.get('/api/documents', (req, res) => {
     const sessionId = req.headers['x-session-id'] || 'default';
     const docs = getSessionDocuments(sessionId);
     res.json(docs);
 });
 
-// Delete Document
+/* Delete */
 app.delete('/api/documents/:id', (req, res) => {
     const sessionId = req.headers['x-session-id'] || 'default';
     const docId = req.params.id;
@@ -195,33 +218,34 @@ app.delete('/api/documents/:id', (req, res) => {
     }
 
     fs.unlinkSync(path.join(sessionDir, targetFile));
+
     res.json({ message: 'Document deleted successfully' });
 });
 
-// Core Q&A Endpoint
+/* Ask */
 app.post('/api/ask', async (req, res) => {
     const { question, targetDocIds } = req.body;
-    
+
     if (!question) {
         return res.status(400).json({ error: 'Question is required' });
     }
 
     if (!process.env.GROQ_API_KEY) {
         return res.status(503).json({
-            error: 'AI service not configured. Please add GROQ_API_KEY to .env file.'
+            error: 'AI service not configured.'
         });
     }
 
     try {
-        // 1. Prepare Context
         const sessionId = req.headers['x-session-id'] || 'default';
         let userDocs = getSessionDocuments(sessionId);
 
-        if (targetDocIds && targetDocIds.length > 0) {
+        if (targetDocIds?.length > 0) {
             userDocs = userDocs.filter(doc => targetDocIds.includes(doc.id));
         }
 
         let allChunks = [];
+
         userDocs.forEach(doc => {
             const content = readFileContent(doc.path);
             const chunks = chunkDocument(content, doc.id, doc.name);
@@ -230,23 +254,22 @@ app.post('/api/ask', async (req, res) => {
 
         if (allChunks.length === 0) {
             return res.json({
-                answer: "No documents available for analysis. Please upload files.",
+                answer: "No documents available for analysis.",
                 sources: []
             });
         }
 
-        // 2. Relevance Scoring
         const questionTerms = question.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
         const scoredChunks = allChunks.map(chunk => {
             let score = 0;
             const chunkLower = chunk.text.toLowerCase();
             questionTerms.forEach(term => {
-                if (chunkLower.includes(term)) score += 1;
+                if (chunkLower.includes(term)) score++;
             });
             return { ...chunk, score };
         });
 
-        // Top Chunks
         const topChunks = scoredChunks
             .filter(c => c.score > 0)
             .sort((a, b) => b.score - a.score)
@@ -254,45 +277,30 @@ app.post('/api/ask', async (req, res) => {
 
         if (topChunks.length === 0) {
             return res.json({
-                answer: "No relevant information found in the active documents.",
+                answer: "No relevant information found.",
                 sources: []
             });
         }
 
-        const contextText = topChunks.map((c, i) => `[Source ${i + 1} - ${c.name}]:\n${c.text}`).join("\n\n");
+        const contextText = topChunks
+            .map((c, i) => `[Source ${i + 1} - ${c.name}]:\n${c.text}`)
+            .join("\n\n");
 
-        // 3. Groq Prompt
         const prompt = `
-        ROLE: You are an elite Intelligence Analyst for a private data console.
-        TASK: Synthesize a precise answer to the user's query using ONLY the provided Context Data.
+        ROLE: You are an elite Intelligence Analyst.
+        Use ONLY provided context.
 
-        STRICT RULES:
-        1. NO HALLUCINATIONS: If the answer is not in the context, state "Insufficient intelligence in current nodes."
-        2. ACCURACY: Prioritize numbers, dates, and names.
-        3. FORMATTING:
-           - Use **Bold** for key figures and entities.
-           - Use clean paragraphs. No markdown code blocks unless requesting code.
-           - Be direct. No filler words ("Here is the answer...").
-        
-        CONTEXT DATA:
+        CONTEXT:
         ${contextText}
 
-        USER QUERY: 
+        QUESTION:
         ${question}
 
-        ANALYSIS:`;
+        ANSWER:
+        `;
 
-        let answerText = "";
-        try {
-            console.log(`Calling Groq API...`);
-            answerText = await callGroqAPI(prompt);
-            console.log(`✓ Groq Success`);
-        } catch (groqErr) {
-            console.log(`✗ Groq failed: ${groqErr.message}`);
-            answerText = "System Error: Neural Link Unstable. Please try again.";
-        }
+        const answerText = await callGroqAPI(prompt);
 
-        // 4. Response
         res.json({
             answer: answerText,
             sources: topChunks.map(c => ({
@@ -305,15 +313,14 @@ app.post('/api/ask', async (req, res) => {
 
     } catch (error) {
         console.error("Server Error:", error);
-        res.status(500).json({ error: 'Internal processing error: ' + error.message });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Start Server
+/* =========================
+   START SERVER
+========================= */
+
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n--------------------------------------`);
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 URL: http://localhost:${PORT}`);
-    console.log(`✅ Groq API: ${process.env.GROQ_API_KEY ? 'CONFIGURED' : 'MISSING'}`);
-    console.log(`--------------------------------------\n`);
 });

@@ -387,7 +387,7 @@ const App = () => {
         </div>
       )}
 
-      {/* --- ERROR POPUP --- */}
+      {/* --- HUMOR ERROR POPUP --- */}
       {uploadError && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 pointer-events-none">
           <div className="theme-bg-aside theme-text-primary p-6 rounded-2xl shadow-2xl pointer-events-auto max-w-sm w-full animate-in slide-in-from-bottom-10 fade-in duration-300 flex items-start gap-4 border theme-border">

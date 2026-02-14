@@ -1,4 +1,4 @@
-
+// Generate or retrieve a unique session ID for this visitor
 const getSessionId = () => {
     let sessionId = localStorage.getItem('private_qa_session');
     if (!sessionId) {
