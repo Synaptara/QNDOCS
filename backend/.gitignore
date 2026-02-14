@@ -1,0 +1,13 @@
+# The "Black Hole" for modules
+node_modules/
+
+# Your top-secret launch codes (API Keys)
+.env
+
+# User data we don't want in the cloud
+uploads/
+*.log
+
+# OS-specific clutter
+.DS_Store
+Thumbs.db
