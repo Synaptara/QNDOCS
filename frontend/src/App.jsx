@@ -172,7 +172,7 @@ const App = () => {
             </a>
             {/* UPDATED CODE BUTTON */}
             <a 
-              href="#"
+              href="https://github.com/Synaptara/QNDOCS.git"
               className="text-[10px] font-bold theme-text-primary bg-[var(--border-color)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-main)] px-3 py-1.5 rounded-md transition-all uppercase tracking-wider"
             >
               CODE
